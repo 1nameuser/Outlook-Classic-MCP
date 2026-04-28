@@ -341,10 +341,44 @@ def save_attachments(
                 f"(message has {len(attachments)} attachments, 1-indexed)."
             )
         attachments = [attachments[attachment_index - 1]]
+
+    import ntpath
     import os
 
     for att in attachments:
-        target = os.path.join(out_dir, att.FileName)
+        # Sender-controlled filename. Reject anything containing path
+        # separators, drive-letter prefixes, dot-only names, or reserved
+        # Windows device names. These are signals of a path-traversal
+        # attempt by the sender, not legitimate attachments.
+        raw = att.FileName or ""
+        if not raw or raw in (".", ".."):
+            raise OutlookError(f"Attachment has invalid filename: {raw!r}")
+        if "\\" in raw or "/" in raw:
+            raise OutlookError(
+                f"Attachment filename contains path separators "
+                f"(rejected for safety): {raw!r}"
+            )
+        if len(raw) >= 2 and raw[1] == ":":
+            raise OutlookError(
+                f"Attachment filename has drive-letter prefix "
+                f"(rejected for safety): {raw!r}"
+            )
+        # Defense in depth: basename should be a no-op after the checks
+        # above, but use it anyway in case ntpath sees something we missed.
+        safe_name = ntpath.basename(raw)
+        if safe_name != raw:
+            raise OutlookError(
+                f"Attachment filename did not normalize cleanly: {raw!r}"
+            )
+        stem = safe_name.split(".", 1)[0].upper()
+        if stem in {"CON", "PRN", "AUX", "NUL"} or (
+            len(stem) == 4 and stem[:3] in {"COM", "LPT"} and stem[3].isdigit()
+        ):
+            raise OutlookError(
+                f"Attachment has reserved Windows device name: {safe_name!r}"
+            )
+
+        target = os.path.join(out_dir, safe_name)
         att.SaveAsFile(target)
         saved.append(target)
     return {
