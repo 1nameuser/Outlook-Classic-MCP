@@ -252,12 +252,18 @@ def reply_mail(
         reply.Body = body + "\n\n" + (reply.Body or "")
     for raw_path in attachments or []:
         reply.Attachments.Add(validate_attachment_path(raw_path))
+    # Cache properties BEFORE Send(): once the reply is sent, the underlying
+    # COM object has effectively moved from Drafts to Sent Items and reading
+    # any of its properties raises a "item has been moved or deleted" COM
+    # error. Surfacing that as a failure causes upstream AI agents to retry
+    # and send duplicates, even though the original Send() succeeded.
+    reply_subject = reply.Subject
     reply.Send()
     return {
         "status": "sent",
         "reply_all": reply_all,
         "in_reply_to": entry_id,
-        "subject": reply.Subject,
+        "subject": reply_subject,
     }
 
 
@@ -282,8 +288,14 @@ def forward_mail(
             fwd.HTMLBody = body + (fwd.HTMLBody or "")
         else:
             fwd.Body = body + "\n\n" + (fwd.Body or "")
+    # Cache properties BEFORE Send(): once the forward is sent, the underlying
+    # COM object has effectively moved from Drafts to Sent Items and reading
+    # any of its properties raises a "item has been moved or deleted" COM
+    # error. Surfacing that as a failure causes upstream AI agents to retry
+    # and send duplicates, even though the original Send() succeeded.
+    fwd_subject = fwd.Subject
     fwd.Send()
-    return {"status": "sent", "forwarded": entry_id, "to": to, "subject": fwd.Subject}
+    return {"status": "sent", "forwarded": entry_id, "to": to, "subject": fwd_subject}
 
 
 def move_mail(outlook: Any, namespace: Any, *, entry_id: str, target_folder: str) -> dict[str, Any]:
