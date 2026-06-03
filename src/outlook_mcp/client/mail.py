@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import ntpath
+import os
 from typing import Any
 
 from outlook_mcp.client.folders import _safe_get, get_item_by_id, resolve_folder
@@ -18,6 +20,10 @@ from outlook_mcp.errors import OutlookError
 from outlook_mcp.utils.formatting import from_iso, to_iso, truncate
 from outlook_mcp.utils.paths import validate_attachment_path, validate_output_dir
 from outlook_mcp.utils.safety import safe_dasl
+
+WINDOWS_RESERVED_DEVICE_NAMES = {"CON", "PRN", "AUX", "NUL", "CLOCK$"} | {
+    f"COM{i}" for i in range(1, 10)
+} | {f"LPT{i}" for i in range(1, 10)}
 
 
 def _mail_summary(item: Any) -> dict[str, Any]:
@@ -354,9 +360,6 @@ def save_attachments(
             )
         attachments = [attachments[attachment_index - 1]]
 
-    import ntpath
-    import os
-
     for att in attachments:
         # Sender-controlled filename. Reject anything containing path
         # separators, drive-letter prefixes, dot-only names, or reserved
@@ -370,9 +373,9 @@ def save_attachments(
                 f"Attachment filename contains path separators "
                 f"(rejected for safety): {raw!r}"
             )
-        if len(raw) >= 2 and raw[1] == ":":
+        if ":" in raw:
             raise OutlookError(
-                f"Attachment filename has drive-letter prefix "
+                f"Attachment filename contains colon "
                 f"(rejected for safety): {raw!r}"
             )
         # Defense in depth: basename should be a no-op after the checks
@@ -382,10 +385,8 @@ def save_attachments(
             raise OutlookError(
                 f"Attachment filename did not normalize cleanly: {raw!r}"
             )
-        stem = safe_name.split(".", 1)[0].upper()
-        if stem in {"CON", "PRN", "AUX", "NUL"} or (
-            len(stem) == 4 and stem[:3] in {"COM", "LPT"} and stem[3].isdigit()
-        ):
+        stem = safe_name.lstrip(".").split(".", 1)[0].upper()
+        if stem in WINDOWS_RESERVED_DEVICE_NAMES:
             raise OutlookError(
                 f"Attachment has reserved Windows device name: {safe_name!r}"
             )
